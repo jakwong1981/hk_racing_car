@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.DS_Store
+*.swp
+*.swo
+*.bak
+
+# Downloaded reference pages and local source copies
+HK Taxi Red _ CGTrader.html
+HK Taxi Red _ CGTrader_files/
+/HK_Taxi_Red.fbx
+*.max
+*.zip
+images.jpeg
+images (1).jpeg
+van.jpeg
+f3751e0b-d80c-4678-9ff1-57afb17c48f2.jpeg
+
+# Local tooling metadata
+.claude/launch.json

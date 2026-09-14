@@ -1,0 +1,10 @@
+.git
+.gitignore
+.hk_racing_car.md.swp
+dist
+docs
+node_modules
+npm-debug.log*
+scripts
+*.tsbuildinfo
+

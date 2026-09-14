@@ -1,0 +1,20 @@
+services:
+  game:
+    image: "${IMAGE_REPOSITORY:-neon-drift-hk}:${IMAGE_TAG:-latest}"
+    container_name: "${CONTAINER_NAME:-neon-drift-hk}"
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
