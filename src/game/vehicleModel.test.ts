@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { prepareDoubleDeckerModel, prepareMinibusModel, prepareTaxiModel } from './vehicleModel'
+import { prepareDoubleDeckerModel, prepareMinibusModel, prepareTaxiModel, prepareTramModel } from './vehicleModel'
 
 describe('road vehicle models', () => {
   it.each([
     { name: 'taxi', prepare: prepareTaxiModel, expectedLength: 2.8 },
     { name: 'minibus', prepare: prepareMinibusModel, expectedLength: 3.2 },
     { name: 'double-decker', prepare: prepareDoubleDeckerModel, expectedLength: 4.2 },
+    { name: 'tram', prepare: prepareTramModel, expectedLength: 4.8 },
   ])('preserves the $name FBX axis conversion while applying the race heading', ({ prepare, expectedLength }) => {
     const model = new THREE.Group()
     model.rotation.x = -Math.PI / 2

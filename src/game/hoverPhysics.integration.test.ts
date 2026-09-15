@@ -28,4 +28,27 @@ describe('Rapier hover integration', () => {
 
     expect(Math.max(...settledHeights) - Math.min(...settledHeights)).toBeLessThan(.001)
   })
+
+  it('returns momentum from a high-restitution building collider', () => {
+    const world = new RAPIER.World({ x: 0, y: -18, z: 0 })
+    world.timestep = 1 / 60
+    const ground = world.createRigidBody(RAPIER.RigidBodyDesc.fixed())
+    world.createCollider(RAPIER.ColliderDesc.cuboid(8, .25, 8).setTranslation(0, -.25, 0), ground)
+    const wall = world.createRigidBody(RAPIER.RigidBodyDesc.fixed())
+    world.createCollider(RAPIER.ColliderDesc.cuboid(.25, 2, 2).setTranslation(2, 1, 0).setFriction(.15).setRestitution(.72), wall)
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 1.1, 0).lockRotations())
+    world.createCollider(RAPIER.ColliderDesc.ball(.85).setDensity(1).setRestitution(.42), body)
+    body.setLinvel({ x: 8, y: 0, z: 0 }, true)
+
+    let reboundObserved = false
+    let furthestX = body.translation().x
+    for (let step = 0; step < 90; step += 1) {
+      world.step()
+      furthestX = Math.max(furthestX, body.translation().x)
+      reboundObserved ||= body.linvel().x < -0.1
+    }
+
+    expect(furthestX).toBeLessThan(2.9)
+    expect(reboundObserved).toBe(true)
+  })
 })

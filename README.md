@@ -18,7 +18,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/), select a vehicle and licence class, then press **START ENGINE**. Keyboard controls are `W`/Arrow Up for acceleration, `A`/`D` or arrow keys for steering, and `Space` for drift. Touch controls are available on small screens.
+Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/), select a vehicle and licence class, then press **START ENGINE**. Keyboard controls are `W`/Arrow Up for acceleration, `A`/`D` or arrow keys for steering, `Space` for drift and `L` for headlights. Touch controls include a LIGHTS toggle on small screens.
 
 ## Program specification
 
@@ -29,16 +29,27 @@ Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/), select a vehicle and lice
 | `src/App.vue` | Setup screen, vehicle/difficulty selection, HUD, pause, finish and restart states |
 | `src/types/game.ts` | Strict TypeScript contracts for vehicles, controls, telemetry and race state |
 | `src/config/gameConfig.ts` | Immutable vehicle and difficulty tuning |
-| `src/game/InputManager.ts` | Keyboard and pointer/touch input boundary |
-| `src/game/GameEngine.ts` | Three.js scene, FBX loading, Rapier physics, fixed-step loop and race lifecycle |
+| `src/game/InputManager.ts` | Keyboard and pointer/touch input boundary, including the `L` headlight toggle |
+| `src/game/GameEngine.ts` | Three.js scene, FBX loading, Rapier physics, building momentum collisions, tracked SpotLights, fixed-step loop and race lifecycle |
+| `src/game/VehicleAudioEngine.ts` | Web Audio MP3 loop, mute control and smoothed per-frame playback output |
+| `src/game/audioModel.ts` | Pure speed, throttle and vehicle-class sample rate/gain tuning |
+| `src/game/audioModel.test.ts` | Vitest coverage for engine pitch, gain and inactive-race silence |
+| `public/audio/small-car-engine2.mp3` | User-provided 20.304-second looping vehicle engine recording used during driving |
 | `src/game/vehicleModel.ts` | Shared FBX normalization, scaling, grounding and heading logic |
 | `src/game/physicsModel.ts` | Pure hover-force, visual smoothing and recovery calculations |
 | `src/game/raceLogic.ts` | Pure drift, turbo, timing and leaderboard rules |
+| `src/game/InputManager.test.ts` | Vitest coverage for headlight toggle and reset semantics |
 | `src/components/VehicleIcon.vue` | Vehicle selection silhouettes |
 | `src/styles.css` | Responsive setup screen, HUD and touch-control styling |
 | `public/models/taxi/HK_Taxi_Red.fbx` | Embedded-texture red taxi model |
 | `public/models/minibus/HK_Minibus_Red.fbx` | Embedded-texture red minibus model |
 | `public/models/double-decker/HK_Doubledeck_002.fbx` | Embedded-texture double-decker model |
+| `public/models/tram/HK_Tram.fbx` | Original supplied tram FBX source model |
+| `public/models/tram/HK_Tram.glb` | Indexed runtime tram model optimized for browser loading |
+| `scripts/convert-tram.mjs` | Reproducible FBX-to-GLB tram conversion and vertex indexing |
+| `public/ads/adv1.jpeg` | User-provided VitaGreen roadside advertisement |
+| `public/ads/adv2.jpeg` | User-provided Deliveroo anniversary roadside advertisement |
+| `public/ads/adv3.jpeg` | User-provided Lion Ball cooking-oil roadside advertisement |
 | `scripts/build.sh` | Locked dependency install, tests, Vite build and Docker image build |
 | `scripts/deploy.sh` | Validated Docker Compose deployment and health polling |
 | `Dockerfile` | Multi-stage Node build and Nginx runtime image |
@@ -65,8 +76,14 @@ classDiagram
   }
   class GameEngine {
     start()
+    setMuted()
     destroy()
     step(dt)
+  }
+  class VehicleAudioEngine {
+    update(speed, throttle, active)
+    setMuted()
+    destroy()
   }
   class VehicleModel {
     prepareTaxiModel()
@@ -82,6 +99,7 @@ classDiagram
   App --> InputManager
   App --> GameEngine
   GameEngine --> InputManager
+  GameEngine --> VehicleAudioEngine
   GameEngine --> VehicleModel
   GameEngine --> RaceLogic
 ```
@@ -92,8 +110,8 @@ Phase 1 has no public HTTP API. The public application contracts are the strict 
 
 - `VehicleId`: `taxi`, `minibus`, `doubleDecker`, `tram`
 - `DifficultyId`: `learner`, `probationary`, `professional`
-- `ControlState`: acceleration, braking, steering and drift inputs
-- `RaceTelemetry`: phase, lap, speed, drift charge, turbo level, checkpoint and Seamless timer
+- `ControlState`: acceleration, braking, steering, drift and headlight inputs
+- `RaceTelemetry`: phase, lap, speed, drift charge, turbo level, checkpoint, Seamless timer and `headlightsOn`
 - `LeaderboardEntry`: display name, vehicle, race time and ranking data
 
 Any future backend should expose typed DTOs and preserve these domain concepts rather than exposing database entities directly.
@@ -104,9 +122,9 @@ Any future backend should expose typed DTOs and preserve these domain concepts r
 
 1. The player chooses one of four Hong Kong vehicles and one of three licence classes.
 2. The engine initializes the scene and physics world, then shows a three-countdown start.
-3. The race runs for two laps on a neon Kowloon-style street track with bilingual signs, wet road patches, shopfronts and building windows.
+3. The race runs for two laps on a neon Kowloon-style street track with a gray-white road, wet road patches, bilingual signs, shopfronts, building windows and rotating user-provided roadside advertising boards.
 4. Players accelerate, steer, drift and release a charged mini-turbo.
-5. Crossing the finish line advances the lap; completing the final lap opens the results state.
+5. A full-width black-and-white chequered line marks the physical lap trigger. Crossing it advances the lap; completing the final lap opens the results state.
 
 ### Vehicle roster
 
@@ -115,19 +133,26 @@ Any future backend should expose typed DTOs and preserve these domain concepts r
 | 的士 / Red Taxi | Speed Demon | Highest speed, low grip, embedded FBX model |
 | 小巴 / Red Minibus | The Brawler | Medium-heavy handling, embedded FBX model |
 | 雙層巴士 / Double-Decker | Juggernaut | Heavy handling, embedded FBX model |
-| 電車 / Tram | Tracked Wall | Procedural textured model in Phase 1 |
+| 電車 / Tram | Tracked Wall | Supplied FBX model with procedural fallback |
 
-The taxi, minibus and double-decker FBX files are loaded only for their selected vehicle. Each model is normalized without modifying its FBXLoader axis conversion: it is scaled to the vehicle class length, centered, grounded at `y = 0`, and wrapped with a world-space heading group. If a model request fails, the matching procedural vehicle remains playable.
+The taxi, minibus and double-decker FBX files and the optimized tram GLB are loaded only for their selected vehicle. Each model is normalized without modifying its loader axis conversion: it is scaled to the vehicle class length, centered, grounded at `y = 0`, and wrapped with a world-space heading group. The original 20MB tram FBX is retained as a source asset and converted with `npm run convert:tram`; the conversion indexes the mesh and embeds four optimized source textures in a roughly 12MB runtime GLB. Running the conversion requires `ffmpeg`, but normal development and production builds use the committed GLB and do not require it. If a model request fails, the matching procedural vehicle remains playable.
 
 ### Driving model
 
 - Rapier uses a dynamic hover-sphere collider and a fixed `1/60` second timestep.
+- The track centerline follows a smooth multi-frequency S-curve; road segments, lane markings, barriers, buildings, shopfronts, ads and overhead signs share the same sampled centerline and heading.
+- A high-resolution 12-by-2 chequered finish texture spans the road at the lap boundary and follows the local curve heading; lap detection uses the same angled line normal.
 - A downward raycast applies mass-scaled hover force and spring/damping correction.
 - Acceleration is applied along the kart heading and lateral force models grip.
 - The browser frame delta is capped at `80 ms` to prevent large simulation jumps.
 - Drift requires steering input and forward speed above `4 m/s`.
 - Drift stages charge at `650 ms`, `1500 ms` and `2400 ms`; release applies the corresponding turbo impulse.
 - The cyan Seamless decal refreshes a five-second low-friction buff.
+- Static building colliders use low friction and high restitution so a façade impact produces a rebound while preserving momentum.
+- Each vehicle has two front SpotLights. `L` and the mobile LIGHTS button toggle them, while per-frame targets track the vehicle's current heading.
+- Each race loops the supplied engine MP3 through a filtered Web Audio graph. Speed and throttle raise playback rate and volume, heavier vehicles start at a lower rate, and pause or finish fades the sample to silence.
+- The HUD speaker control mutes and unmutes the live vehicle sound without changing race state.
+- Three supplied advertisements are loaded uncropped at their original aspect ratios on track-facing boards. Each side gets a fresh shuffled sequence per race; every board has a warm point light for night readability.
 - Out-of-bounds or invalid physics positions reset to the start transform and zero velocity.
 
 ### State model
@@ -168,13 +193,14 @@ sequenceDiagram
   participant Render as Three.js
   Player->>Vue: Select vehicle and difficulty
   Vue->>Engine: start(options)
-  Engine->>Physics: Create world, ground and hover collider
+  Engine->>Physics: Create world, curved-track ground and hover collider
   Engine->>Render: Build city scene and selected vehicle
   loop Every animation frame
     Player->>Input: Keyboard or touch input
     Engine->>Input: Read ControlState
     Engine->>Physics: Apply forces and step at 60 Hz
     Physics-->>Engine: Position, velocity and recovery state
+    Engine->>Engine: Update vehicle audio from speed and throttle
     Engine->>Render: Synchronize kart and camera
     Vue-->>Player: HUD and race feedback
   end
@@ -227,7 +253,7 @@ npm run build
 npm run build:image
 ```
 
-The build script runs `npm ci`, Vitest, the TypeScript/Vite production build, and `docker build`. The Dockerfile copies `public/models`, so the FBX vehicle assets are included in the image.
+The build script runs `npm ci`, Vitest, the TypeScript/Vite production build, and `docker build`. The Dockerfile copies `public/models` and `public/ads`, so the FBX vehicle assets and supplied advertisement textures are included in the image.
 
 ### Local deployment
 
@@ -267,7 +293,8 @@ Current automated coverage includes:
 - Race-time formatting and immutable leaderboard sorting
 - Mass-scaled hover force and sustained forward motion
 - Track-volume recovery and fixed-step physics behavior
-- Taxi, minibus and double-decker model normalization, grounding and scale contracts
+- Taxi, minibus, double-decker and tram model normalization, grounding and scale contracts
+- Vehicle sample playback rate, throttle gain, heavy-vehicle profile and inactive-race silence
 - Production type-check and Vite build through `npm run build`
 
 The current suite does not require a database or external API. Browser-level WebGL assertions and a Redis-backed leaderboard integration suite are planned for a later phase.

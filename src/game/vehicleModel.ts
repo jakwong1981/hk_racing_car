@@ -28,3 +28,5 @@ export const prepareTaxiModel = (model: THREE.Object3D): THREE.Group => prepareR
 export const prepareMinibusModel = (model: THREE.Object3D): THREE.Group => prepareRoadVehicleModel(model, 3.2)
 
 export const prepareDoubleDeckerModel = (model: THREE.Object3D): THREE.Group => prepareRoadVehicleModel(model, 4.2)
+
+export const prepareTramModel = (model: THREE.Object3D): THREE.Group => prepareRoadVehicleModel(model, 4.8)

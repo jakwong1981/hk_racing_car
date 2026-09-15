@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue'
-import { Gauge, Pause, Play, RotateCcw, Volume2, VolumeX, Zap } from 'lucide-vue-next'
+import { Gauge, Lightbulb, Pause, Play, RotateCcw, Volume2, VolumeX, Zap } from 'lucide-vue-next'
 import VehicleIcon from './components/VehicleIcon.vue'
 import taxiPhoto from './assets/taxi-transparent.png'
 import minibusPhoto from './assets/minibus-transparent.png'
@@ -17,7 +17,7 @@ const selectedVehicle = ref<VehicleId>('taxi')
 const selectedDifficulty = ref<DifficultyId>('probationary')
 const countdown = ref(3)
 const muted = ref(false)
-const telemetry = reactive<RaceTelemetry>({ phase:'setup',speedKmh:0,lap:1,totalLaps:2,checkpoint:1,raceTimeMs:0,position:3,driftStage:0,driftCharge:0,seamlessRemainingMs:0 })
+const telemetry = reactive<RaceTelemetry>({ phase:'setup',speedKmh:0,lap:1,totalLaps:2,checkpoint:1,raceTimeMs:0,position:3,driftStage:0,driftCharge:0,seamlessRemainingMs:0,headlightsOn:true })
 const leaderboard = computed<LeaderboardEntry[]>(() => [
   {id:'1',name:'夜更阿明',vehicle:'minibus',timeMs:telemetry.raceTimeMs-1850},
   {id:'2',name:'KOWLOON KID',vehicle:'tram',timeMs:telemetry.raceTimeMs-730},
@@ -31,12 +31,26 @@ const input = new InputManager()
 let engine: GameEngine | undefined
 let countdownTimer: number | undefined
 
-const startRace = async (): Promise<void> => { telemetry.phase='countdown';countdown.value=3; await nextTick(); engine?.destroy(); if(!canvas.value)return; engine=new GameEngine({canvas:canvas.value,vehicle:currentVehicle.value,difficulty:currentDifficulty.value,controls:input.state,telemetry,onFinish:finishRace});await engine.start();input.connect();countdownTimer=window.setInterval(()=>{countdown.value--;if(countdown.value<=0){window.clearInterval(countdownTimer);telemetry.phase='racing'}},720) }
+const startRace = async (): Promise<void> => {
+  telemetry.phase='countdown'
+  countdown.value=3
+  window.clearInterval(countdownTimer)
+  engine?.destroy()
+  if(!canvas.value)return
+  engine=new GameEngine({canvas:canvas.value,vehicle:currentVehicle.value,difficulty:currentDifficulty.value,controls:input.state,telemetry,onFinish:finishRace})
+  engine.setMuted(muted.value)
+  await nextTick()
+  await engine.start()
+  input.connect()
+  countdownTimer=window.setInterval(()=>{countdown.value--;if(countdown.value<=0){window.clearInterval(countdownTimer);telemetry.phase='racing'}},720)
+}
 const finishRace = ():void => { telemetry.phase='finished'; input.reset() }
 const restart = ():void => { telemetry.speedKmh=0;telemetry.lap=1;telemetry.raceTimeMs=0;telemetry.driftCharge=0;telemetry.seamlessRemainingMs=0;void startRace() }
 const returnToSetup = ():void => { telemetry.phase='setup';engine?.destroy();engine=undefined;input.disconnect() }
 const togglePause = ():void => { telemetry.phase=telemetry.phase==='paused'?'racing':'paused';input.reset() }
 const setTouch = (control:'accelerate'|'brake'|'left'|'right'|'drift',active:boolean):void => input.setControl(control,active)
+const toggleLights = ():void => input.toggleHeadlights()
+const toggleAudio = ():void => { muted.value=!muted.value; engine?.setMuted(muted.value) }
 onBeforeUnmount(()=>{engine?.destroy();input.disconnect();window.clearInterval(countdownTimer)})
 </script>
 
@@ -57,9 +71,9 @@ onBeforeUnmount(()=>{engine?.destroy();input.disconnect();window.clearInterval(c
       <aside class="leaderboard"><h2>龍虎榜 <span>LIVE</span></h2><ol><li v-for="(entry,index) in leaderboard" :key="entry.id" :class="{player:entry.isPlayer}"><b>{{index+1}}</b><VehicleIcon :vehicle="entry.vehicle"/><span>{{entry.name}}</span><time>{{entry.isPlayer?'RACING':formatRaceTime(Math.max(0,entry.timeMs))}}</time></li></ol></aside>
       <section class="speedometer" aria-label="Speed"><Gauge :size="18"/><strong>{{Math.round(telemetry.speedKmh).toString().padStart(3,'0')}}</strong><span>KM/H</span><div><i :style="{width:`${telemetry.speedKmh/2}%`}"></i></div></section>
       <section class="drift-meter"><div><Zap :size="17" fill="currentColor"/><span>MINI-TURBO</span><b>LV {{telemetry.driftStage}}</b></div><meter min="0" max="100" :value="telemetry.driftCharge"></meter><small>{{telemetry.driftStage ? 'RELEASE TO BOOST / 放開加速' : 'HOLD DRIFT + TURN'}}</small></section>
-      <aside class="status-panel"><div v-if="telemetry.seamlessRemainingMs>0" class="buff"><span>SEAMLESS</span><b>無縫狀態</b><strong>{{(telemetry.seamlessRemainingMs/1000).toFixed(1)}}s</strong></div><div class="controls"><h3>CONTROLS 操作</h3><p><kbd>W</kbd><span>ACCELERATE</span></p><p><kbd>A</kbd><kbd>D</kbd><span>STEER</span></p><p><kbd>SPACE</kbd><span>DRIFT</span></p></div></aside>
-      <button class="audio" type="button" :aria-label="muted?'Unmute':'Mute'" @click="muted=!muted"><VolumeX v-if="muted"/><Volume2 v-else/></button>
-      <div class="touch-controls" aria-label="Touch controls"><div><button @pointerdown="setTouch('left',true)" @pointerup="setTouch('left',false)" @pointerleave="setTouch('left',false)">←</button><button @pointerdown="setTouch('right',true)" @pointerup="setTouch('right',false)" @pointerleave="setTouch('right',false)">→</button></div><div><button class="drift" @pointerdown="setTouch('drift',true)" @pointerup="setTouch('drift',false)" @pointerleave="setTouch('drift',false)">DRIFT</button><button class="gas" @pointerdown="setTouch('accelerate',true)" @pointerup="setTouch('accelerate',false)" @pointerleave="setTouch('accelerate',false)">GAS</button></div></div>
+      <aside class="status-panel"><div v-if="telemetry.seamlessRemainingMs>0" class="buff"><span>SEAMLESS</span><b>無縫狀態</b><strong>{{(telemetry.seamlessRemainingMs/1000).toFixed(1)}}s</strong></div><div class="controls"><h3>CONTROLS 操作</h3><p><kbd>W</kbd><span>ACCELERATE</span></p><p><kbd>A</kbd><kbd>D</kbd><span>STEER</span></p><p><kbd>SPACE</kbd><span>DRIFT</span></p><p><kbd>L</kbd><span>LIGHTS {{telemetry.headlightsOn?'ON':'OFF'}}</span></p></div></aside>
+      <button class="audio" type="button" :aria-label="muted?'Unmute vehicle audio':'Mute vehicle audio'" :aria-pressed="muted" @click="toggleAudio"><VolumeX v-if="muted"/><Volume2 v-else/></button>
+      <div class="touch-controls" aria-label="Touch controls"><div><button @pointerdown="setTouch('left',true)" @pointerup="setTouch('left',false)" @pointerleave="setTouch('left',false)">←</button><button @pointerdown="setTouch('right',true)" @pointerup="setTouch('right',false)" @pointerleave="setTouch('right',false)">→</button><button class="lights" :class="{active:telemetry.headlightsOn}" :aria-pressed="telemetry.headlightsOn" @click="toggleLights"><Lightbulb :size="18"/>LIGHTS</button></div><div><button class="drift" @pointerdown="setTouch('drift',true)" @pointerup="setTouch('drift',false)" @pointerleave="setTouch('drift',false)">DRIFT</button><button class="gas" @pointerdown="setTouch('accelerate',true)" @pointerup="setTouch('accelerate',false)" @pointerleave="setTouch('accelerate',false)">GAS</button></div></div>
       <div v-if="telemetry.phase==='countdown'" class="countdown"><span>{{countdown || 'GO'}}</span><small>STAND BY / 準備</small></div>
       <section v-if="telemetry.phase==='paused'||telemetry.phase==='finished'" class="modal"><p>{{telemetry.phase==='paused'?'RACE CONTROL':'CHECKERED FLAG'}}</p><h2>{{telemetry.phase==='paused'?'PAUSED 暫停':'FINISH 完成'}}</h2><strong v-if="telemetry.phase==='finished'">{{formatRaceTime(telemetry.raceTimeMs)}}</strong><div><button v-if="telemetry.phase==='paused'" @click="togglePause"><Play/> RESUME</button><button @click="restart"><RotateCcw/> RESTART</button><button @click="returnToSetup">GARAGE</button></div></section>
     </template>

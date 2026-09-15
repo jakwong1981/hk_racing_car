@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HOVER_HEIGHT, hoverForceFor, shouldRecoverKart, simulateStraightDrive, smoothVisualHeight } from './physicsModel'
+import { HOVER_HEIGHT, hasCrossedTrackLine, hoverForceFor, shouldRecoverKart, simulateStraightDrive, smoothVisualHeight, trackCenterX, trackHeadingAt, trackPointAt } from './physicsModel'
 
 describe('hover kart smoke model', () => {
   it('counters gravity for every vehicle mass at target hover height', () => {
@@ -28,5 +28,24 @@ describe('hover kart smoke model', () => {
   it('recovers a kart below or outside the track volume', () => {
     expect(shouldRecoverKart(0, -3.1, -100)).toBe(true)
     expect(shouldRecoverKart(23, 1, -100)).toBe(true)
+    expect(shouldRecoverKart(trackCenterX(-180) + 21, 1, -180)).toBe(false)
+    expect(shouldRecoverKart(trackCenterX(-180) + 23, 1, -180)).toBe(true)
+  })
+
+  it('provides a smooth curved centerline and lateral track points', () => {
+    expect(trackCenterX(8)).toBeCloseTo(0, 5)
+    expect(trackCenterX(-100)).not.toBeCloseTo(trackCenterX(8), 1)
+    expect(Math.abs(trackHeadingAt(-100))).toBeGreaterThan(.01)
+
+    const point = trackPointAt(-100, 10)
+    expect(point.x).toBeCloseTo(trackCenterX(-100) + 10 * Math.cos(point.heading), 8)
+    expect(point.z).toBeCloseTo(-100 + 10 * Math.sin(point.heading), 8)
+  })
+
+  it('detects crossing along the local curved finish-line normal', () => {
+    const finishZ = -292
+    const finish = trackPointAt(finishZ)
+    expect(hasCrossedTrackLine(finish.x, finish.z + 2, finishZ)).toBe(false)
+    expect(hasCrossedTrackLine(finish.x, finish.z - 2, finishZ)).toBe(true)
   })
 })
