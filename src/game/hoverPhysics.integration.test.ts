@@ -1,6 +1,8 @@
 import RAPIER from '@dimforge/rapier3d-compat'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { hoverForceFor } from './physicsModel'
+import { addStripCollider, ROAD_SURFACE } from './physics/trackColliders'
+import { HOVER_HEIGHT, hoverForceFor } from './physicsModel'
+import { TrackPath } from './track/trackPath'
 
 beforeAll(async () => {
   await RAPIER.init()
@@ -50,5 +52,25 @@ describe('Rapier hover integration', () => {
 
     expect(furthestX).toBeLessThan(2.9)
     expect(reboundObserved).toBe(true)
+  })
+
+  it('hovers at a constant clearance over a sloped trimesh road strip', () => {
+    const world = new RAPIER.World({ x: 0, y: -18, z: 0 })
+    world.timestep = 1 / 60
+    const ramp = TrackPath.fromControlPoints([{ x: 0, y: 0, z: 0 }, { x: 0, y: 4, z: -50 }, { x: 0, y: 8, z: -100 }], false)
+    addStripCollider(world, ramp, { fromS: 0, toS: ramp.length, step: 2, left: { lateral: -8, height: 0 }, right: { lateral: 8, height: 0 } }, ROAD_SURFACE)
+    const start = ramp.pointAt(50, 0, 1.1)
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(start.x, start.y, start.z).setLinearDamping(.25).lockRotations())
+    const collider = world.createCollider(RAPIER.ColliderDesc.ball(.85).setDensity(1), body)
+
+    for (let step = 0; step < 600; step += 1) {
+      body.resetForces(true)
+      const ray = new RAPIER.Ray(body.translation(), { x: 0, y: -1, z: 0 })
+      const hit = world.castRay(ray, 2.2, true, undefined, undefined, collider, body)
+      if (hit) body.addForce({ x: 0, y: hoverForceFor(body.mass(), 18, hit.timeOfImpact, body.linvel().y), z: 0 }, true)
+      world.step()
+    }
+
+    expect(ramp.project(body.translation()).vertical).toBeCloseTo(HOVER_HEIGHT, 1)
   })
 })

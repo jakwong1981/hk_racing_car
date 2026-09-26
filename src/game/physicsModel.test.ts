@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { HOVER_HEIGHT, hasCrossedTrackLine, hoverForceFor, shouldRecoverKart, simulateStraightDrive, smoothVisualHeight, trackCenterX, trackHeadingAt, trackPointAt } from './physicsModel'
+import { HONG_KONG_ROUTE } from '../config/tracks/hongKongRoute'
+import { HOVER_HEIGHT, hoverForceFor, simulateStraightDrive, smoothVisualHeight } from './physicsModel'
+import { courseLayoutFor, isOutsideTrackVolume } from './raceProgress'
+import { TrackPath } from './track/trackPath'
 
 describe('hover kart smoke model', () => {
   it('counters gravity for every vehicle mass at target hover height', () => {
@@ -13,39 +16,20 @@ describe('hover kart smoke model', () => {
   })
 
   it('filters solver noise while following meaningful height changes', () => {
-    expect(smoothVisualHeight(.4,.401,1/60)).toBe(.4)
-    expect(smoothVisualHeight(.4,1.4,1/60)).toBeGreaterThan(.4)
+    expect(smoothVisualHeight(.4, .401, 1 / 60)).toBe(.4)
+    expect(smoothVisualHeight(.4, 1.4, 1 / 60)).toBeGreaterThan(.4)
   })
 
-  it('sustains acceleration and track framing for fifteen seconds', () => {
+  it('sustains acceleration inside the Mong Kok track volume for fifteen seconds', () => {
+    const path = TrackPath.fromControlPoints(HONG_KONG_ROUTE.controlPoints, HONG_KONG_ROUTE.closed)
+    const course = courseLayoutFor(HONG_KONG_ROUTE, path.length)
+
     const sample = simulateStraightDrive(15, 19, 44)
+    const projection = path.project({ x: path.pointAt(HONG_KONG_ROUTE.startS).x, y: sample.y, z: Math.max(sample.z, -300) })
+
     expect(sample.speed).toBeGreaterThan(0)
     expect(sample.z).toBeLessThan(8)
     expect(sample.y).toBeCloseTo(HOVER_HEIGHT)
-    expect(shouldRecoverKart(0, sample.y, Math.max(sample.z, -300))).toBe(false)
-  })
-
-  it('recovers a kart below or outside the track volume', () => {
-    expect(shouldRecoverKart(0, -3.1, -100)).toBe(true)
-    expect(shouldRecoverKart(23, 1, -100)).toBe(true)
-    expect(shouldRecoverKart(trackCenterX(-180) + 21, 1, -180)).toBe(false)
-    expect(shouldRecoverKart(trackCenterX(-180) + 23, 1, -180)).toBe(true)
-  })
-
-  it('provides a smooth curved centerline and lateral track points', () => {
-    expect(trackCenterX(8)).toBeCloseTo(0, 5)
-    expect(trackCenterX(-100)).not.toBeCloseTo(trackCenterX(8), 1)
-    expect(Math.abs(trackHeadingAt(-100))).toBeGreaterThan(.01)
-
-    const point = trackPointAt(-100, 10)
-    expect(point.x).toBeCloseTo(trackCenterX(-100) + 10 * Math.cos(point.heading), 8)
-    expect(point.z).toBeCloseTo(-100 + 10 * Math.sin(point.heading), 8)
-  })
-
-  it('detects crossing along the local curved finish-line normal', () => {
-    const finishZ = -292
-    const finish = trackPointAt(finishZ)
-    expect(hasCrossedTrackLine(finish.x, finish.z + 2, finishZ)).toBe(false)
-    expect(hasCrossedTrackLine(finish.x, finish.z - 2, finishZ)).toBe(true)
+    expect(isOutsideTrackVolume(course, projection)).toBe(false)
   })
 })

@@ -6,11 +6,24 @@
 
 | Path | Responsibility |
 | --- | --- |
-| `src/App.vue` | Race setup, HUD, touch controls, pause and completion presentation |
-| `src/types/game.ts` | Public game-state, vehicle, difficulty and leaderboard contracts |
+| `src/App.vue` | Race setup (vehicle, driver class, circuit), HUD with lap and checkpoint progress, touch controls, pause and completion presentation |
+| `src/types/game.ts` | Public game-state, vehicle, difficulty, leaderboard and `TrackDefinition` contracts |
 | `src/config/gameConfig.ts` | Immutable vehicle and difficulty tuning data |
+| `src/config/trackConfig.ts` | Selectable circuit catalogue |
+| `src/config/tracks/hongKongRoute.ts` | Mong Kok sprint: open spline generated from the original S-curve, 3 checkpoints, 2 laps |
+| `src/config/tracks/neonRift.ts` | Neon Rift draft layout: 1.6 km closed circuit with elevation, sunken tunnel chicane, viaduct crest, 12 hidden checkpoints, 5 laps |
 | `src/game/InputManager.ts` | Keyboard and touch input boundary, including persistent headlight toggle state |
-| `src/game/GameEngine.ts` | Three.js scene, Rapier world, building collision momentum, tracked headlights, fixed-step simulation and race lifecycle |
+| `src/game/GameEngine.ts` | Rendering coordinator: renderer, camera, interpolation between fixed physics steps, vehicle pitch, headlight aiming, audio and resize lifecycle |
+| `src/game/RaceSimulation.ts` | Headless Rapier race: track colliders, fixed-step vehicle physics, recovery, boost pads, checkpoint and lap progression |
+| `src/game/raceProgress.ts` | Pure in-order checkpoint, anti-shortcut lap, closed-loop seam and recovery-point rules |
+| `src/game/track/trackPath.ts` | Arc-length spline (`TrackPath`) with wrap-aware distances, lateral points and nearest-point projection |
+| `src/game/track/trackStrip.ts` | Pure ribbon triangulation shared by road/wall meshes and trimesh colliders |
+| `src/game/themes/*.ts` | Per-track scenery and collider builders (`hongKong`, `neonRift`) behind `TrackThemeBuilder` |
+| `src/game/scene/trackMeshes.ts` | Strip mesh and chequered finish-line construction |
+| `src/game/scene/hongKongStreetFurniture.ts` | Data-driven Hong Kong street details shared by both tracks: bilingual green gantry signs with route boxes, red-ringed speed-limit signs, white 慢駛 SLOW and lane-arrow road text, dashed lane lines, and zebra crossings with 望右/望左 kerb text and amber beacons |
+| `src/game/physics/trackColliders.ts` | Trimesh strip and oriented box colliders with named surface responses |
+| `src/game/vehicle/VehicleController.ts` | Hover, thrust, braking, steering, lateral grip and drift/mini-turbo forces on the Rapier body |
+| `src/game/vehicle/vehicleFactory.ts` | FBX/GLB vehicle loading, procedural fallback bodies and tracked headlights |
 | `src/game/VehicleAudioEngine.ts` | Web Audio MP3 graph lifecycle, smoothed playback updates and mute state |
 | `src/game/audioModel.ts` | Pure vehicle-class playback-rate and gain calculation from speed, throttle and race activity |
 | `src/game/audioModel.test.ts` | Vitest unit coverage for vehicle sound behavior |
@@ -29,9 +42,12 @@
 | `src/components/VehicleIcon.vue` | Reusable vehicle-class silhouette |
 | `src/styles.css` | Responsive setup, HUD and touch-control presentation |
 | `src/game/raceLogic.test.ts` | Vitest unit coverage for pure race rules |
-| `src/game/physicsModel.test.ts` | Vitest smoke coverage for gravity compensation, sustained drive and recovery |
-| `src/game/hoverPhysics.integration.test.ts` | Rapier integration coverage for stable hover and momentum-preserving building impacts |
-| `src/game/hoverPhysics.integration.test.ts` | Rapier integration coverage for stable hover and momentum-preserving building impacts |
+| `src/game/physicsModel.test.ts` | Vitest smoke coverage for gravity compensation, sustained drive and track-volume containment |
+| `src/game/hoverPhysics.integration.test.ts` | Rapier integration coverage for stable hover, momentum-preserving building impacts and hover over a sloped trimesh road |
+| `src/game/raceSimulation.integration.test.ts` | Scripted-driver laps of Neon Rift and the Mong Kok sprint on real colliders without recovery |
+| `src/game/raceProgress.test.ts` | Checkpoint ordering, shortcut rejection, seam crossing and recovery-point coverage |
+| `src/game/track/trackPath.test.ts`, `trackStrip.test.ts` | Spline measurement, wrapping, projection and ribbon winding coverage |
+| `src/config/trackConfig.test.ts` | Track catalogue integrity: checkpoint order, Mong Kok centreline parity, Neon Rift length, grade and non-overlap |
 | `src/game/InputManager.test.ts` | Vitest coverage for headlight toggling and input reset semantics |
 | `Dockerfile` | Reproducible Node build and minimal Nginx runtime image |
 | `compose.yaml` | Hardened single-service runtime and health-check contract |
@@ -45,6 +61,7 @@
 classDiagram
   class App {
     RaceTelemetry telemetry
+    TrackId selectedTrack
     startRace()
     togglePause()
     toggleLights()
@@ -58,59 +75,92 @@ classDiagram
     toggleHeadlights()
   }
   class GameEngine {
-    World world
     WebGLRenderer renderer
     start()
     destroy()
-    step()
-    updateHeadlights()
+    syncVisuals()
+  }
+  class RaceSimulation {
+    TrackPath path
+    create(options)
+    step() StepOutcome
+  }
+  class VehicleController {
+    applyDriveForces()
+    placeAt(pose)
+  }
+  class RaceProgress {
+    advanceRaceProgress()
+    isOutsideTrackVolume()
+    recoverToReset()
+  }
+  class TrackPath {
+    length
+    sampleAt(s)
+    pointAt(s, lateral)
+    project(point, hintS)
+  }
+  class TrackThemeBuilder {
+    buildScenery(context)
+    buildColliders(world, path, track)
   }
   class VehicleAudioEngine {
     update(speed, throttle, active)
     setMuted()
     destroy()
   }
-  class RaceLogic {
-    driftStageFor()
-    driftChargeFor()
-    turboImpulseFor()
-    formatRaceTime()
-  }
   class GameContracts {
     VehicleSpec
     DifficultySpec
+    TrackDefinition
     ControlState
     RaceTelemetry
   }
   App --> InputManager
   App --> GameEngine
   App --> GameContracts
-  GameEngine --> InputManager
+  GameEngine --> RaceSimulation
+  GameEngine --> TrackThemeBuilder
   GameEngine --> VehicleAudioEngine
-  GameEngine --> RaceLogic
-  GameEngine --> GameContracts
+  RaceSimulation --> VehicleController
+  RaceSimulation --> RaceProgress
+  RaceSimulation --> TrackPath
+  RaceSimulation --> TrackThemeBuilder
+  TrackThemeBuilder --> TrackPath
 ```
 
 ### Public Contracts
 
 Phase 1 is a client-only prototype and exposes no HTTP endpoints. Its public contracts are the TypeScript interfaces in `src/types/game.ts`. A future leaderboard backend should preserve `LeaderboardEntry` and wrap responses in a typed envelope with `code`, `message`, `data`, and `timestamp`.
 
+`TrackDefinition` is the track data contract. Every distance `s` is metres along the spline centreline from the first control point; lateral offsets are metres to the right of travel. It is plain serialisable data so checkpoint and landmark coordinates can later be exported as JSON for the operations map.
+
+| Field | Meaning |
+| --- | --- |
+| `closed` | `true` for circuits (laps continue across the seam), `false` for sprints (the vehicle returns to `startS` after each lap) |
+| `controlPoints` | Centripetal Catmull-Rom control points `{x, y, z}` including elevation |
+| `roadWidth`, `recoveryLateral` | Drivable width and the lateral distance beyond which the vehicle is recovered |
+| `startS`, `finishS`, `checkpointS` | Grid, finish gate and hidden in-order checkpoint gates |
+| `laps` | Laps required to finish |
+| `boostPads`, `tunnels` | Seamless-buff sensors and covered ranges |
+
 ## Functional Specification
 
 ### Race Flow
 
-1. The player selects one of four vehicle specifications and one of three difficulty specifications.
-2. Starting a race creates the Three.js scene and Rapier world, then runs a three-count countdown.
+1. The player selects one of four vehicle specifications, one of three difficulty specifications and one of two circuits.
+2. Starting a race creates the `RaceSimulation` (Rapier world plus the circuit's colliders), then the Three.js scenery for the circuit's theme, then runs a three-count countdown.
 3. When the red taxi, red minibus or double-decker is selected, the engine loads its matching FBX. The tram loads an indexed GLB generated from the supplied 20MB FBX because parsing its 759,009 unindexed vertices and four 4096px embedded images at race start stalls the browser. The conversion retains those four textures at a game-appropriate resolution in a single roughly 12MB GLB. Every format is normalized for orientation, scale, center and ground position. A loading failure falls back to the matching procedural vehicle without blocking the race.
-4. During racing, `requestAnimationFrame` gathers elapsed time and advances Rapier at a fixed 60 Hz step. The road follows a smooth sampled S-curve; surrounding geometry and lane markings use the same centerline so visual and physical track framing stay aligned.
+4. During racing, `requestAnimationFrame` gathers elapsed time and advances `RaceSimulation.step()` at a fixed 60 Hz. Every track is a `TrackPath` spline; road meshes, trimesh road/wall colliders, scenery, checkpoints and recovery all address it by distance `s` and lateral offset, so visual and physical framing stay aligned. The vehicle pitches visually to the local grade.
 5. Acceleration acts along kart heading, steering changes yaw, and lateral forces model grip.
 6. Holding drift while steering above the minimum speed hops once and accumulates charge. Releasing applies the impulse assigned to the achieved drift stage.
 7. Entering the fluorescent decal radius refreshes the Seamless timer to five seconds and minimizes lateral friction.
 8. Building façades are represented by static Rapier cuboids with low friction and high restitution. Impacts therefore preserve horizontal momentum and rebound the selected vehicle instead of allowing it to pass through the city wall.
 9. Every vehicle receives two front SpotLights. Pressing `L`, or the mobile LIGHTS control, toggles both lights. Their targets are updated each frame from the vehicle position and yaw so the beam follows steering.
 10. The three supplied advertising textures are loaded before the race begins and placed on both roadside facades. Landscape and portrait source ratios are preserved, board order is freshly shuffled per side, and each board receives a warm point light.
-11. A black-and-white 12-by-2 chequered ground marking spans the curved road at the finish plane. Crossing it resets the kart for the next lap; completing two laps transitions to the finished state.
-12. Starting the race creates a filtered browser Web Audio graph and begins looping the supplied engine MP3 at zero race gain. Each rendered frame maps current speed and throttle to smoothed playback-rate and gain values, with lower base rates for heavier vehicles. Countdown, pause and finish states target zero gain, while the HUD speaker button controls the master gain.
+11. A black-and-white 12-by-2 chequered marking spans the road at `finishS`. After each step the vehicle is projected onto the spline. Hidden checkpoints must be crossed forward and in order; crossing the finish only counts a lap once all of them are passed. Sprints return the vehicle to the grid after each lap, circuits continue across the seam. Exceeding the track's `laps` transitions to the finished state.
+12. Neon Rift (draft) renders a dark wet road with magenta and cyan edge lines, glass barrier walls with colliders, a covered tunnel with amber lamp strips through the T7–T9 chicane, lit pillars under the viaduct, neon arches and an instanced tower canyon down to the city floor at y = -14.
+13. Starting the race creates a filtered browser Web Audio graph and begins looping the supplied engine MP3 at zero race gain. Each rendered frame maps current speed and throttle to smoothed playback-rate and gain values, with lower base rates for heavier vehicles. Countdown, pause and finish states target zero gain, while the HUD speaker button controls the master gain.
 
 ### Validation and Boundaries
 
@@ -127,8 +177,12 @@ Phase 1 is a client-only prototype and exposes no HTTP endpoints. Its public con
 | Headlights | `L` toggles both front SpotLights; the mobile LIGHTS button exposes the same state and telemetry reflects `headlightsOn` |
 | Building collision | Static building colliders use restitution and low friction so impacts rebound with momentum; out-of-bounds recovery remains reserved for leaving the track volume |
 | Road palette | Road and wet patches use a gray-white material palette for visibility against the night city |
-| Track geometry | `trackCenterX`, `trackHeadingAt` and `trackPointAt` define the shared curved centerline used by road, markings and roadside props |
-| Finish line | The visual chequered line and lap trigger share `FINISH_LINE_Z`; `hasCrossedTrackLine` projects the kart onto the local curve normal so angled crossings match the marking |
+| Track selection | Must be one of `hongKongRoute`, `neonRift` |
+| Track geometry | `TrackPath` requires at least 2 (open) or 3 (closed) control points; samples every ~1 m by arc length; yaw follows the vehicle convention forward = (-sin yaw, 0, -cos yaw) |
+| Projection | Nearest-point search runs in a ±60 m window around the previous `s`, falling back to a global search when the window's best match is more than 30 m away; height differences are weighted ×2 so stacked roads resolve to the correct level |
+| Checkpoints | Gates count only when crossed forward in order within a single step of at most 25 m, so teleports and shortcuts never register |
+| Finish line | The visual chequered line and lap gate share `finishS`; the first pass from the grid does not count because checkpoints are still outstanding |
+| Recovery | Vehicle is recovered when more than 3 m below the road, beyond `recoveryLateral`, or past either end of an open sprint; it respawns at the last passed checkpoint (or the grid/finish at lap start) facing along the track |
 | Advertising assets | `adv1.jpeg`, `adv2.jpeg` and `adv3.jpeg` are loaded from `/ads/`, preserve source aspect ratio and render uncropped on the track-facing face of illuminated boards |
 | Vehicle audio | The supplied MP3 loops continuously; speed is clamped to the 0-180 km/h sound model range; non-racing phases output zero sample gain; mute changes only the master gain |
 
@@ -150,7 +204,7 @@ stateDiagram-v2
 
 ### Error Recovery
 
-WebGL or WASM initialization failures reject `GameEngine.start()` and remain visible in the browser console during Phase 1. Normal user recovery is a page reload. The physics controller restores the kart to the last race reset point if it leaves the supported track volume. A production phase should add a typed initialization-error state and a non-WebGL compatibility screen.
+WebGL or WASM initialization failures reject `GameEngine.start()` and remain visible in the browser console during Phase 1. Normal user recovery is a page reload. `RaceSimulation` restores the vehicle to the last passed checkpoint if it leaves the supported track volume, and reports the step as `recovered` so the renderer skips interpolation across the jump. A production phase should add a typed initialization-error state and a non-WebGL compatibility screen.
 
 ## Infrastructure and Deployment Topology
 
@@ -191,10 +245,16 @@ Build and validate both the SPA and its image:
 npm run build:image
 ```
 
-Deploy locally and wait for the Nginx health endpoint:
+Rebuild the image from the current source, deploy locally and wait for the Nginx health endpoint:
 
 ```bash
 npm run deploy
+```
+
+Redeploy the existing image without rebuilding:
+
+```bash
+SKIP_BUILD=1 npm run deploy
 ```
 
 Deploy an explicitly versioned image on another port:
@@ -217,14 +277,20 @@ sequenceDiagram
   participant Rapier as Rapier World
   participant Three as Three.js Renderer
   Player->>Vue: Select vehicle/difficulty and start
-  Vue->>Engine: start(options)
-  Engine->>Rapier: initialize world and colliders
+  participant Sim as RaceSimulation
+  Vue->>Engine: start(options with TrackDefinition)
+  Engine->>Sim: create(track, theme)
+  Sim->>Rapier: build spline road/wall colliders and vehicle body
+  Engine->>Three: build theme scenery along TrackPath
   loop Every animation frame
     Player->>Input: Keyboard or touch controls
-    Engine->>Input: Read ControlState
-    Engine->>Rapier: Apply forces, building collision response and fixed physics step
-    Rapier-->>Engine: Kart transform and sensor proximity
-    Engine->>Engine: Update vehicle pitch and gain from telemetry and throttle
+    loop Each 1/60 s fixed step
+      Sim->>Input: Read ControlState
+      Sim->>Rapier: Apply hover, drive and grip forces, then step
+      Rapier-->>Sim: Vehicle transform
+      Sim->>Sim: Project onto TrackPath, recover or advance checkpoints and laps
+    end
+    Engine->>Engine: Interpolate transform, pitch to grade, update audio gain
     Engine->>Three: Track SpotLight targets from kart yaw
     Engine->>Vue: Mutate typed telemetry
     Engine->>Three: Synchronize meshes and render
@@ -252,6 +318,14 @@ npm run test
 | UNIT-002 | Drift cap and boost | Test runtime available | 5000 ms, stages 2 and 3 | Charge 100; stage 3 impulse greater | Assertions pass |
 | UNIT-003 | Race formatting/ranking | Unsorted entries | 65430 ms and two times | `1:05.43`; lower time first | Assertions pass without mutating input |
 | UNIT-004 | Headlight input state | New InputManager | Toggle then reset | Headlight state toggles and survives transient input reset | Assertions pass |
+| UNIT-006 | Track path maths | Test runtime available | Straight, open and closed square paths | Arc length, clamping/wrapping, seam continuity, right-hand lateral offsets and global fallback projection | Assertions pass |
+| UNIT-007 | Checkpoint ordering | Closed 1000 m loop and open sprint layouts | Stepwise driving, a 640 m shortcut, seam crossings | Laps only after all gates; shortcut leaves lap at 1; reset point follows last gate | Assertions pass |
+| UNIT-008 | Track catalogue integrity | Both definitions | Spline sampling | Ordered checkpoints; Mong Kok stays within 5 cm of the legacy centreline; Neon Rift 1.5–1.7 km, grade < 12%, non-adjacent sections > 32 m apart | Assertions pass |
+| INT-001 | Sloped trimesh hover | Rapier initialised | Ramp strip collider, 10 s hover | Clearance settles at the hover height | Within 0.05 m |
+| INT-002 | Scripted lap drivability | Rapier initialised | Look-ahead autopilot, taxi, Professional | Neon Rift and Mong Kok finish one lap with zero recoveries and all checkpoints | Neon Rift lap 25–150 s (currently 71 s) |
+| FUNC-019 | Circuit selection | Setup visible | Choose Neon Rift, start | HUD shows `1/5` and `CP 0/12`; neon scenery renders | Start bar shows `HARBOUR VIADUCT CIRCUIT` |
+| FUNC-020 | Closed-circuit lap | Neon Rift race active | Drive a full lap through all checkpoints | Lap counter advances without teleporting to the grid | `CP` resets to 0 and lap increments at the finish gate |
+| FUNC-021 | Anti-shortcut | Neon Rift race active | Leave the track and rejoin further along | Vehicle recovers to the last passed checkpoint; skipped gates are not credited | Lap does not increment |
 | UNIT-005 | Vehicle sound mapping | Test runtime available | Vehicle, speed, throttle and race-active state | Driving raises sample rate/gain; heavy vehicles use a lower base rate; inactive race is silent | Exact playback-rate and gain relationships pass |
 | FUNC-001 | Start default race | Setup visible | Taxi, Probationary | Countdown then active HUD | Canvas renders; phase becomes racing |
 | FUNC-002 | Vehicle tuning | Setup visible | Each vehicle option | Stats and kart form update | Selected contract reaches engine |

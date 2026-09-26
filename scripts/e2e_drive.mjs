@@ -10,6 +10,7 @@ import { join } from 'node:path'
 const TARGET_URL = process.env.GAME_URL ?? 'http://127.0.0.1:8099/'
 const VEHICLE = process.env.VEHICLE ?? 'tram'
 const DIFFICULTY = process.env.DIFFICULTY ?? 'professional'
+const TRACK = process.env.TRACK ?? 'hongKongRoute'
 const DRIVE_SECONDS = Number(process.env.DRIVE_SECONDS ?? 45)
 const PORT = Number(process.env.CDP_PORT ?? 9333)
 const CHROME = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -126,8 +127,8 @@ console.log(JSON.stringify(await telemetry(), null, 2))
 
 // Pick the vehicle and difficulty from the setup list.
 const picked = await evaluate(`(() => {
-  const buttons = [...document.querySelectorAll('.vehicle-list button, .difficulty-list button')]
-  const wanted = ['${VEHICLE}', '${DIFFICULTY}']
+  const buttons = [...document.querySelectorAll('.vehicle-list button, .difficulty-list button, .track-list button')]
+  const wanted = ['${VEHICLE}', '${DIFFICULTY}', '${TRACK}']
   let chosen = []
   for (const want of wanted) {
     const target = buttons.find(b => b.className.includes(want)) ?? null

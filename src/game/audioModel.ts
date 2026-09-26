@@ -12,6 +12,14 @@ const BASE_PLAYBACK_RATE: Record<VehicleId, number> = {
   tram: .92,
 }
 
+export interface TunnelMix { dry: number; wet: number }
+
+/** Inside a tunnel the engine is amplified as well as reverberated, then snaps back to a clean open-air mix on exit. */
+export const tunnelMixFor = (blend: number): TunnelMix => {
+  const amount = Math.max(0, Math.min(1, blend))
+  return { dry: 1 + .3 * amount, wet: .85 * amount }
+}
+
 export const engineSoundFrameFor = (vehicle: VehicleId, speedKmh: number, accelerating: boolean, active: boolean): EngineSoundFrame => {
   const speedRatio = Math.min(1, Math.max(0, speedKmh) / 180)
   const throttle = accelerating ? 1 : 0

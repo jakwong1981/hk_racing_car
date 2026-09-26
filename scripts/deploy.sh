@@ -35,9 +35,16 @@ fi
 
 cd "$PROJECT_ROOT"
 
-if ! docker image inspect "$IMAGE_REPOSITORY:$IMAGE_TAG" >/dev/null 2>&1; then
-  echo "Image $IMAGE_REPOSITORY:$IMAGE_TAG was not found; building it first"
-  IMAGE_REPOSITORY="$IMAGE_REPOSITORY" IMAGE_TAG="$IMAGE_TAG" "$PROJECT_ROOT/scripts/build.sh"
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+  if ! docker image inspect "$IMAGE_REPOSITORY:$IMAGE_TAG" >/dev/null 2>&1; then
+    echo "SKIP_BUILD=1 but image $IMAGE_REPOSITORY:$IMAGE_TAG does not exist" >&2
+    exit 1
+  fi
+  echo "Skipping build; redeploying existing image $IMAGE_REPOSITORY:$IMAGE_TAG"
+else
+  # The Dockerfile runs tests and the production build, so this always reflects the current source.
+  echo "Building container image $IMAGE_REPOSITORY:$IMAGE_TAG from current source"
+  docker build --tag "$IMAGE_REPOSITORY:$IMAGE_TAG" .
 fi
 
 export IMAGE_REPOSITORY IMAGE_TAG CONTAINER_NAME APP_PORT COMPOSE_PROJECT_NAME

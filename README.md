@@ -262,7 +262,7 @@ The build script runs `npm ci`, Vitest, the TypeScript/Vite production build, an
 npm run deploy
 ```
 
-`deploy.sh` validates the port and retry count, verifies Docker availability, builds a missing image, starts Compose with `--force-recreate`, and polls:
+`deploy.sh` validates the port and retry count, verifies Docker availability, rebuilds the image from the current source (set `SKIP_BUILD=1` to redeploy the existing image unchanged), starts Compose with `--force-recreate`, and polls:
 
 ```text
 GET http://127.0.0.1:${APP_PORT}/healthz
