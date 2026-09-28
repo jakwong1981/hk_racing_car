@@ -5,7 +5,8 @@ import { addStripCollider, ROAD_SURFACE, type SurfaceResponse } from '../physics
 import { addHongKongStreetFurniture, type HongKongStreetLayout } from '../scene/hongKongStreetFurniture'
 import { addHoloBrakeWall, addKerbs, addPuddles, addReferencePillars, addWarningLamps, combineAnimators, wetRoadAnimator, type SetPieceContext } from '../scene/neonSetPieces'
 import { createFinishLine, createStripMesh } from '../scene/trackMeshes'
-import type { TrackPath } from '../track/trackPath'
+import { landmarkPosition } from '../track/trackFeatures'
+import type { TrackPath, TrackPoint } from '../track/trackPath'
 import type { StripSpec } from '../track/trackStrip'
 import type { SceneryAnimator, TrackBuildContext, TrackThemeBuilder } from './trackTheme'
 
@@ -19,6 +20,7 @@ const TUNNEL_HEIGHT = 8
 const PILLAR_SPACING = 20
 const ARCH_SPACING = 160
 const TOWER_SPACING = 22
+const PLAZA_RADIUS = 30
 const STRIP_STEP = 2
 /** Glass barriers absorb more energy than the Hong Kong façades so wall contact costs speed. */
 const BARRIER_SURFACE: SurfaceResponse = { friction: .2, restitution: .35 }
