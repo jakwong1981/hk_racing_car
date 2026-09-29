@@ -1,6 +1,6 @@
 # Neon Drift Hong Kong
 
-Neon Drift Hong Kong is a client-side Vue 3, Three.js and Rapier arcade racing prototype set on a neon-lit Hong Kong street circuit. Players select a local vehicle, race through two laps, drift to charge a mini-turbo, and drive through a Seamless water decal that reduces lateral friction.
+Neon Drift Hong Kong is a client-side Vue 3, Three.js and Rapier arcade racing prototype with two selectable courses: the two-lap **Mong Kok sprint** (`hongKongRoute`) and the five-lap **Neon Rift / 霓虹裂谷** street circuit (`neonRift`). Players select a local vehicle, race three AI rivals, drift to charge a mini-turbo, and on Neon Rift manage dynamic weather, aquaplaning puddles, kerbs and a blind viaduct crest.
 
 The current Phase 1 implementation is a browser-only game. The FastAPI and Redis leaderboard described in the original GDD are future scope; no backend service or database is required today.
 
@@ -18,7 +18,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/), select a vehicle and licence class, then press **START ENGINE**. Keyboard controls are `W`/Arrow Up for acceleration, `A`/`D` or arrow keys for steering, `Space` for drift and `L` for headlights. Touch controls include a LIGHTS toggle on small screens.
+Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/), select a vehicle, licence class and circuit, then press **START ENGINE**. Keyboard controls are `W`/Arrow Up for acceleration, `A`/`D` or arrow keys for steering, `Space` for drift and `L` for headlights. Touch controls include a LIGHTS toggle on small screens.
 
 ## Program specification
 
@@ -26,13 +26,22 @@ Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/), select a vehicle and lice
 
 | Path | Responsibility |
 | --- | --- |
-| `src/App.vue` | Setup screen, vehicle/difficulty selection, HUD, pause, finish and restart states |
-| `src/types/game.ts` | Strict TypeScript contracts for vehicles, controls, telemetry and race state |
-| `src/config/gameConfig.ts` | Immutable vehicle and difficulty tuning |
+| `src/App.vue` | Setup screen, vehicle/difficulty/circuit selection, HUD (lap, checkpoints, standings, weather, grip), pause, finish and restart states |
+| `src/types/game.ts` | Strict TypeScript contracts for vehicles, controls, telemetry, standings and `TrackDefinition` |
+| `src/config/gameConfig.ts` | Immutable vehicle, difficulty and AI rival tuning |
+| `src/config/trackConfig.ts`, `src/config/tracks/*.ts` | Circuit catalogue: Mong Kok sprint and Neon Rift track data |
 | `src/game/InputManager.ts` | Keyboard and pointer/touch input boundary, including the `L` headlight toggle |
-| `src/game/GameEngine.ts` | Three.js scene, FBX loading, Rapier physics, building momentum collisions, tracked SpotLights, fixed-step loop and race lifecycle |
-| `src/game/VehicleAudioEngine.ts` | Web Audio MP3 loop, mute control and smoothed per-frame playback output |
-| `src/game/audioModel.ts` | Pure speed, throttle and vehicle-class sample rate/gain tuning |
+| `src/game/GameEngine.ts` | Rendering coordinator: scene, camera, interpolation, headlights, rain, tunnel audio blend and resize lifecycle |
+| `src/game/RaceSimulation.ts` | Headless Rapier race: colliders, fixed-step physics for player and rivals, weather, surfaces, checkpoints, laps and standings |
+| `src/game/weatherModel.ts` | Weather stages, racing-line grip, braking and aquaplaning rules |
+| `src/game/vehicle/handlingModel.ts`, `VehicleController.ts` | Understeer yaw cap, crest unloading, spin and braking forces |
+| `src/game/ai/aiDriver.ts`, `src/game/track/racingLine.ts` | AI steering, rubber-banding, racing line and target-speed profile |
+| `src/game/propDebris.ts`, `src/game/scene/propField.ts` | Visual-only destructible barrels and signs |
+| `src/game/themes/*.ts`, `src/game/scene/*.ts` | Per-track scenery, set pieces (holo brake wall, warning lamps, pillars, kerbs, puddles), street furniture and rain |
+| `src/game/track/*.ts` | Arc-length spline, ribbon geometry, landmark features and JSON export |
+| `docs/race_track.md`, `docs/track-data/*.json` | Neon Rift design brief and exported checkpoint/landmark coordinates (`npm run export:tracks`) |
+| `src/game/VehicleAudioEngine.ts` | Web Audio MP3 loop, tunnel reverb, mute control and smoothed per-frame playback output |
+| `src/game/audioModel.ts` | Pure speed, throttle, vehicle-class and tunnel-mix sample tuning |
 | `src/game/audioModel.test.ts` | Vitest coverage for engine pitch, gain and inactive-race silence |
 | `public/audio/small-car-engine2.mp3` | User-provided 20.304-second looping vehicle engine recording used during driving |
 | `src/game/vehicleModel.ts` | Shared FBX normalization, scaling, grounding and heading logic |
@@ -120,11 +129,48 @@ Any future backend should expose typed DTOs and preserve these domain concepts r
 
 ### Player experience
 
-1. The player chooses one of four Hong Kong vehicles and one of three licence classes.
-2. The engine initializes the scene and physics world, then shows a three-countdown start.
-3. The race runs for two laps on a neon Kowloon-style street track with a gray-white road, wet road patches, bilingual signs, shopfronts, building windows and rotating user-provided roadside advertising boards.
-4. Players accelerate, steer, drift and release a charged mini-turbo.
-5. A full-width black-and-white chequered line marks the physical lap trigger. Crossing it advances the lap; completing the final lap opens the results state.
+1. The player chooses one of four Hong Kong vehicles, one of three licence classes and one of two circuits.
+2. The engine initializes the scene and physics world, places the player on a grid with three AI rivals, then shows a three-count start.
+3. **Mong Kok sprint** runs two laps on a Kowloon-style open street with a gray-white road, wet patches, bilingual signs, shopfronts and rotating roadside advertising boards. **Neon Rift** runs five laps on a closed night circuit (see below).
+4. Players accelerate, steer, drift and release a charged mini-turbo. Hidden checkpoints must be passed in order, so shortcuts never count.
+5. A full-width chequered line marks the lap gate. Completing the final lap opens the results state with the finishing order.
+
+### Neon Rift circuit (霓虹裂谷)
+
+A roughly 1.6 km clockwise street circuit with 15 named corners, 12 hidden checkpoints and 5 laps, built from `docs/race_track.md`. A scripted lap in a taxi on Professional takes about 74 s.
+
+**Look and sound**
+
+- Dark wet asphalt with magenta and cyan edge lines, glass barrier walls, neon arches every 160 m and a canyon of lit towers descending to a city floor 14 m below the road.
+- Elevation changes: the road drops about 7 m into a covered aqueduct tunnel, then climbs about 12 m to the harbour viaduct, which stands on lit pillars.
+- Inside the tunnel (s ≈ 705–955 m) the engine gets louder and gains reverb; it snaps back to a clean mix on exit.
+- Heavy rain streaks and denser fog during the storm stage.
+
+**Key corners**
+
+| Corner | Effect on driving |
+| --- | --- |
+| Turn 3 財閥廣場 (Tycoon Plaza), right-angle right | A 22 m holographic board sits straight ahead. It turns into a red warning when your current speed means you must brake now, adjusted for the weather's braking grip. Overshooting sends you into the glass wall, which absorbs speed (low bounce, low friction). Towers keep a 30 m clear plaza around the board so it stays visible. |
+| Turns 7–9 地下水道 (aqueduct chicane), inside the tunnel | Blinking amber warning lamps line both sides and the kerbs glow. Kerbs give slightly less grip (92% dry, 80% when wet), so cutting them trades grip for a shorter line. A bad entry leaves you understeering into the walls. |
+| Turn 14 跨港大橋 (harbour viaduct), blind crest | Three reference pillars on the left; the second one glows blue as the turn-in marker. Over the crest the suspension unloads and grip falls by up to 65%. Steering too hard there can trigger a 0.9 s spin. |
+
+**Dynamic weather** (the race leader's distance sets the sky for everyone)
+
+| Stage | When | Effect |
+| --- | --- | --- |
+| Damp | Laps 1–2 | Full grip and normal braking; the road looks lightly wet |
+| Storm | From about 535 m into lap 3 | Grip drops to 65%, braking deceleration to 83% (about 20% longer stopping distance). Driving through a puddle above 28 m/s (about 100 km/h) causes aquaplaning, with grip at 10% |
+| Drying | Laps 4–5 | Grip on the racing line recovers gradually to 100%. Off the line it stays at 72–80%. Puddles stop causing aquaplaning once the track is 35% dry |
+
+**Handling, rivals and props**
+
+- Cornering is capped by grip and speed, so low grip or high speed makes the car understeer instead of turning on the spot. Drifting raises the cap by 60%.
+- Three AI rivals (夜更阿明, KOWLOON KID, 港島速遞) follow a computed racing line and brake for each bend using a speed profile that reacts to the weather's grip. They never share your vehicle. They get up to 6% faster when behind you and slower when ahead. A rival stuck for 2.5 s is recovered automatically.
+- Barrels and signs at the Turn 3, chicane and Turn 14 exits scatter when hit. They are visual only and don't cost you speed.
+- The HUD shows weather, surface grip %, aquaplaning and spin warnings, and live standings with gaps.
+- Checkpoint and landmark coordinates are exported to `docs/track-data/neonRift.json` for a future operations map.
+
+**Differences from the design brief** (`docs/race_track.md`): the brief calls for a 5.8 km track, a lap time of about 1:42 and a 1.2 km viaduct straight. The current layout is a 1.6 km prototype, and there's no tyre choice yet.
 
 ### Vehicle roster
 
@@ -294,7 +340,12 @@ Current automated coverage includes:
 - Mass-scaled hover force and sustained forward motion
 - Track-volume recovery and fixed-step physics behavior
 - Taxi, minibus, double-decker and tram model normalization, grounding and scale contracts
-- Vehicle sample playback rate, throttle gain, heavy-vehicle profile and inactive-race silence
+- Vehicle sample playback rate, throttle gain, heavy-vehicle profile, tunnel mix and inactive-race silence
+- Track spline maths, checkpoint ordering, anti-shortcut laps and track catalogue integrity
+- Weather stages, racing-line grip, storm braking and aquaplaning thresholds
+- Understeer yaw cap, crest unloading and spin triggering
+- AI steering, rubber-banding, racing line, standings ordering and prop debris
+- Scripted full laps of both circuits, plus three rivals completing a clean storm lap on Neon Rift
 - Production type-check and Vite build through `npm run build`
 
 The current suite does not require a database or external API. Browser-level WebGL assertions and a Redis-backed leaderboard integration suite are planned for a later phase.

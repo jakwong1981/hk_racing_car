@@ -11,7 +11,7 @@
 | `src/config/gameConfig.ts` | Immutable vehicle and difficulty tuning data |
 | `src/config/trackConfig.ts` | Selectable circuit catalogue |
 | `src/config/tracks/hongKongRoute.ts` | Mong Kok sprint: open spline generated from the original S-curve, 3 checkpoints, 2 laps |
-| `src/config/tracks/neonRift.ts` | Neon Rift draft layout: 1.6 km closed circuit with elevation, sunken tunnel chicane, viaduct crest, 12 hidden checkpoints, 5 laps |
+| `src/config/tracks/neonRift.ts` | Neon Rift layout: 1.6 km closed circuit with elevation, sunken tunnel chicane, viaduct crest, 12 hidden checkpoints, 5 laps |
 | `src/game/InputManager.ts` | Keyboard and touch input boundary, including persistent headlight toggle state |
 | `src/game/GameEngine.ts` | Rendering coordinator: renderer, camera, interpolation between fixed physics steps, vehicle pitch, headlight aiming, audio and resize lifecycle |
 | `src/game/RaceSimulation.ts` | Headless Rapier race: track colliders, fixed-step vehicle physics, recovery, boost pads, checkpoint and lap progression |
@@ -23,6 +23,17 @@
 | `src/game/scene/hongKongStreetFurniture.ts` | Data-driven Hong Kong street details shared by both tracks: bilingual green gantry signs with route boxes, red-ringed speed-limit signs, white 慢駛 SLOW and lane-arrow road text, dashed lane lines, and zebra crossings with 望右/望左 kerb text and amber beacons |
 | `src/game/physics/trackColliders.ts` | Trimesh strip and oriented box colliders with named surface responses |
 | `src/game/vehicle/VehicleController.ts` | Hover, thrust, braking, steering, lateral grip and drift/mini-turbo forces on the Rapier body |
+| `src/game/vehicle/handlingModel.ts` | Pure understeer yaw-rate cap, crest suspension unloading, spin trigger and braking-distance rules |
+| `src/game/weatherModel.ts` | Pure weather-stage resolution (damp, storm, drying) and surface grip, braking and aquaplaning conditions |
+| `src/game/ai/aiDriver.ts` | Pure AI rival controls, look-ahead and rubber-band pace factor |
+| `src/game/track/racingLine.ts` | Racing-line lateral offsets and grip-aware target-speed profile shared by AI and drying-line grip |
+| `src/game/standings.ts` | Live race order and gap calculation |
+| `src/game/propDebris.ts`, `src/game/scene/propField.ts` | Visual-only destructible barrels and signs |
+| `src/game/track/trackFeatures.ts` | Landmark positions, tunnel audio blend, zone and brake-warning rules |
+| `src/game/scene/neonSetPieces.ts` | Neon Rift holo brake wall, warning lamps, reference pillars, kerbs and puddles |
+| `src/game/scene/rainEffect.ts` | Storm rain streaks around the camera |
+| `src/game/track/trackExport.ts`, `scripts/export-track-data.ts` | JSON export of checkpoint, corner and landmark coordinates to `docs/track-data/` |
+| `docs/race_track.md` | Neon Rift design brief |
 | `src/game/vehicle/vehicleFactory.ts` | FBX/GLB vehicle loading, procedural fallback bodies and tracked headlights |
 | `src/game/VehicleAudioEngine.ts` | Web Audio MP3 graph lifecycle, smoothed playback updates and mute state |
 | `src/game/audioModel.ts` | Pure vehicle-class playback-rate and gain calculation from speed, throttle and race activity |
@@ -159,8 +170,28 @@ Phase 1 is a client-only prototype and exposes no HTTP endpoints. Its public con
 9. Every vehicle receives two front SpotLights. Pressing `L`, or the mobile LIGHTS control, toggles both lights. Their targets are updated each frame from the vehicle position and yaw so the beam follows steering.
 10. The three supplied advertising textures are loaded before the race begins and placed on both roadside facades. Landscape and portrait source ratios are preserved, board order is freshly shuffled per side, and each board receives a warm point light.
 11. A black-and-white 12-by-2 chequered marking spans the road at `finishS`. After each step the vehicle is projected onto the spline. Hidden checkpoints must be crossed forward and in order; crossing the finish only counts a lap once all of them are passed. Sprints return the vehicle to the grid after each lap, circuits continue across the seam. Exceeding the track's `laps` transitions to the finished state.
-12. Neon Rift (draft) renders a dark wet road with magenta and cyan edge lines, glass barrier walls with colliders, a covered tunnel with amber lamp strips through the T7–T9 chicane, lit pillars under the viaduct, neon arches and an instanced tower canyon down to the city floor at y = -14.
-13. Starting the race creates a filtered browser Web Audio graph and begins looping the supplied engine MP3 at zero race gain. Each rendered frame maps current speed and throttle to smoothed playback-rate and gain values, with lower base rates for heavier vehicles. Countdown, pause and finish states target zero gain, while the HUD speaker button controls the master gain.
+12. Neon Rift renders a dark wet road with magenta and cyan edge lines, glass barrier walls with colliders, a covered tunnel with amber lamp strips through the T7–T9 chicane, lit pillars under the viaduct, neon arches and an instanced tower canyon down to the city floor at y = -14. Towers keep a 30 m plaza clear around the Turn 3 brake wall.
+13. Starting the race creates a filtered browser Web Audio graph and begins looping the supplied engine MP3 at zero race gain. Each rendered frame maps current speed and throttle to smoothed playback-rate and gain values, with lower base rates for heavier vehicles, and blends in tunnel gain and reverb near covered ranges. Countdown, pause and finish states target zero gain, while the HUD speaker button controls the master gain.
+14. Three AI rivals join every race, never in the player's vehicle. Each follows the racing line toward a look-ahead point, targets the speed profile scaled by the square root of current grip, and adjusts pace up to ±6% depending on the gap to the player. Rivals stationary for 2.5 s are recovered; the player never is.
+15. The weather follows the track's `weather` stages, keyed to the race leader's total distance. Weather, surface grip, aquaplaning, spin state and standings are published in `RaceTelemetry`.
+
+### Neon Rift Gameplay Effects
+
+| Feature | Location | Effect |
+| --- | --- | --- |
+| Turn 3 holo brake wall | Board 70 m beyond s = 345, active s = 250–365 | Board turns red when the braking distance to the corner speed, at 85% of the brake limit and scaled by weather braking, is reached |
+| Glass barriers | Both road edges | Friction 0.2, restitution 0.35: contact costs speed rather than rebounding |
+| Aqueduct tunnel | s = 705–955 | Engine gain up to +30% and reverb wet mix up to 0.85, faded over 18 m at each portal |
+| T7–T9 warning lamps and kerbs | s = 755–860 | Lamps blink at 3 Hz. Kerb grip is 0.92 dry and 0.80 when wetness > 0.5 |
+| Viaduct crest and pillars | T11–T14, s ≈ 1295–1435 | Suspension unloading up to 1 cuts grip by up to 65%. The blue second pillar at s = 1395 is the turn-in reference |
+| Spin | Anywhere | Speed > 15 m/s, grip < 0.35 and requested yaw > 2.2× the cap for 250 ms spins the car for 900 ms |
+| Weather: damp | Laps 1–2 | Grip 1.0, braking 1.0, wetness 0.35 |
+| Weather: storm | Lap 3 from s = 535 | Grip 0.65, braking 0.83, rain and denser fog |
+| Weather: drying | Laps 4–5 | On-line grip rises from 0.65 to 1.0 with dryness; off-line grip is 0.72–0.80; braking recovers to 1.0 |
+| Aquaplaning | Puddles at s = 600, 1050, 1180, 1540 | Above 28 m/s while puddles stand (storm, or drying below 35% dryness): grip 0.1 |
+| Destructible props | Barrels and signs at T3, chicane exit and T14 | Knocked into flight with bounce and spin. Visual only: the car's velocity is never changed |
+
+Differences from `docs/race_track.md`: the brief specifies a 5.8 km lap, a lap time of about 1:42, a 1.2 km full-throttle viaduct straight and a tyre choice. The implementation is a 1.6 km prototype with no tyre selection.
 
 ### Validation and Boundaries
 
@@ -322,7 +353,15 @@ npm run test
 | UNIT-007 | Checkpoint ordering | Closed 1000 m loop and open sprint layouts | Stepwise driving, a 640 m shortcut, seam crossings | Laps only after all gates; shortcut leaves lap at 1; reset point follows last gate | Assertions pass |
 | UNIT-008 | Track catalogue integrity | Both definitions | Spline sampling | Ordered checkpoints; Mong Kok stays within 5 cm of the legacy centreline; Neon Rift 1.5–1.7 km, grade < 12%, non-adjacent sections > 32 m apart | Assertions pass |
 | INT-001 | Sloped trimesh hover | Rapier initialised | Ramp strip collider, 10 s hover | Clearance settles at the hover height | Within 0.05 m |
-| INT-002 | Scripted lap drivability | Rapier initialised | Look-ahead autopilot, taxi, Professional | Neon Rift and Mong Kok finish one lap with zero recoveries and all checkpoints | Neon Rift lap 25–150 s (currently 71 s) |
+| INT-002 | Scripted lap drivability | Rapier initialised | Look-ahead autopilot, taxi, Professional | Neon Rift and Mong Kok finish one lap with zero recoveries and all checkpoints | Neon Rift lap 25–150 s (currently 74 s) |
+| UNIT-009 | Weather and surface | Test runtime available | Stage list, progress, puddle, kerb, speed | Damp/storm/drying resolution; storm grip 0.65 and braking 0.83; aquaplaning only above 28 m/s in standing water; drying racing line out-grips off-line | Assertions pass |
+| UNIT-010 | Handling limits | Test runtime available | Speed, grip, ray distance, yaw request | Yaw cap falls with speed and grip; crest unloading reduces grip; sustained overdrive on low grip triggers a 900 ms spin | Assertions pass |
+| UNIT-011 | AI and standings | Test runtime available | Heading error, speed, gap; race progress | Binary steering and throttle choices; rubber band within ±6%; standings ordered by lap and distance | Assertions pass |
+| UNIT-012 | Prop debris | Test runtime available | Car position and velocity near a prop | Prop launches, bounces and comes to rest; car velocity input is unchanged | Assertions pass |
+| INT-003 | Rival field | Rapier initialised | Neon Rift, three rivals, including a full storm lap | Rivals finish cleanly without recovery; standings stay consistent | Assertions pass |
+| FUNC-022 | Storm and aquaplaning | Neon Rift, lap 3 past s = 535 | Drive through a puddle above 100 km/h | Rain visible, HUD weather shows storm, grip drops, `水漂 AQUAPLANING` banner | Banner shows only at speed in the puddle |
+| FUNC-023 | Turn 3 brake board | Neon Rift race active | Approach Turn 3 at full speed | Board turns red at the braking point | Board returns to normal after braking or passing |
+| FUNC-024 | Tunnel audio | Neon Rift, sound on | Drive through s = 705–955 | Engine louder with reverb inside, clean on exit | Audible change fades over the portals |
 | FUNC-019 | Circuit selection | Setup visible | Choose Neon Rift, start | HUD shows `1/5` and `CP 0/12`; neon scenery renders | Start bar shows `HARBOUR VIADUCT CIRCUIT` |
 | FUNC-020 | Closed-circuit lap | Neon Rift race active | Drive a full lap through all checkpoints | Lap counter advances without teleporting to the grid | `CP` resets to 0 and lap increments at the finish gate |
 | FUNC-021 | Anti-shortcut | Neon Rift race active | Leave the track and rejoin further along | Vehicle recovers to the last passed checkpoint; skipped gates are not credited | Lap does not increment |
